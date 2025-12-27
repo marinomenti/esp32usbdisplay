@@ -32,7 +32,7 @@ Ein USB-Display-System, das PC-Systemdaten (CPU/GPU Temperatur, Lüfter, Auslast
 | GPIO 23   | MOSI        | Daten    |
 | GPIO 18   | SCK         | Clock    |
 | GPIO 5    | CS          | Chip Select |
-| GPIO 2    | DC          | Data/Command |
+| GPIO 17   | DC          | Data/Command |
 | GPIO 4    | RST         | Reset    |
 | 3.3V      | VCC         | Stromversorgung |
 | GND       | GND         | Masse    |

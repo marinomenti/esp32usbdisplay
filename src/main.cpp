@@ -65,7 +65,7 @@ void drawStaticLayout() {
 void setup() {
   Serial.begin(115200);
   tft.init();
-  tft.setRotation(1);
+  tft.setRotation(3);  // 270° - um 180° gedreht gegenüber vorher (war 1 = 90°)
   tft.fillScreen(COLOR_BG);
   
   // Großes Sprite für CONNECTION LOST

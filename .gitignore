@@ -29,3 +29,5 @@ Thumbs.db
 # IDE
 .idea/
 *.sublime-*
+housing/ESP32USBDisplay.skb
+housing/AutoSave_ESP32USBDisplay.skp
