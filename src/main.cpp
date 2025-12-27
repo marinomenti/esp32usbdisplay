@@ -22,12 +22,23 @@ struct SystemData {
 // Display-Modi
 #define DISPLAY_MODE_NORMAL 0
 #define DISPLAY_MODE_WAVES 1
+#define DISPLAY_MODE_HISTOGRAM 2
 uint8_t displayMode = DISPLAY_MODE_NORMAL;
 unsigned long lastModeSwitch = 0;
 #define MODE_SWITCH_INTERVAL 10000  // 10 Sekunden
 
 // Wave-Animation
 float wavePhase = 0.0;
+
+// Histogramm-Historie (320 Werte = 320 Pixel Breite)
+#define HISTORY_SIZE 320
+float cpuHistory[HISTORY_SIZE];
+float gpuHistory[HISTORY_SIZE];
+int historyIndex = 0;
+unsigned long lastHistoryUpdate = 0;
+#define HISTORY_UPDATE_INTERVAL 1000  // Alle 1 Sekunde neuer Wert
+unsigned long lastHistogramDraw = 0;
+#define HISTOGRAM_DRAW_INTERVAL 5000  // Alle 5 Sekunden neu zeichnen
 
 #define SCREEN_WIDTH 320
 #define SCREEN_HEIGHT 240
@@ -101,6 +112,12 @@ void setup() {
   tft.setTextDatum(MC_DATUM);
   tft.setTextColor(COLOR_LABEL);
   tft.drawString("Waiting for data...", SCREEN_WIDTH/2, SCREEN_HEIGHT/2, 4);
+  
+  // Initialisiere History-Arrays
+  for (int i = 0; i < HISTORY_SIZE; i++) {
+    cpuHistory[i] = 0.0;
+    gpuHistory[i] = 0.0;
+  }
 }
 
 void updateHeader() {
@@ -112,8 +129,17 @@ void updateHeader() {
   
   // Mode-Indikator rechts oben
   tft.setTextDatum(TR_DATUM);
-  tft.setTextColor(displayMode == DISPLAY_MODE_WAVES ? 0x07FF : COLOR_LABEL);
-  tft.drawString(displayMode == DISPLAY_MODE_WAVES ? "~" : "=", SCREEN_WIDTH - 10, HEADER_HEIGHT/2, 4);
+  String modeIcon = "=";
+  uint16_t modeColor = COLOR_LABEL;
+  if (displayMode == DISPLAY_MODE_WAVES) {
+    modeIcon = "~";
+    modeColor = 0x07FF;
+  } else if (displayMode == DISPLAY_MODE_HISTOGRAM) {
+    modeIcon = "#";
+    modeColor = COLOR_GOOD;
+  }
+  tft.setTextColor(modeColor);
+  tft.drawString(modeIcon, SCREEN_WIDTH - 10, HEADER_HEIGHT/2, 4);
 }
 
 void drawLabel(int y, const char* label) {
@@ -262,6 +288,72 @@ void drawWaveVisualization() {
   waveSprite.pushSprite(0, startY + 60);  // Etwas höher positioniert
 }
 
+void drawHistogram() {
+  static bool firstDraw = true;
+  
+  int startY = HEADER_HEIGHT;
+  int height = SCREEN_HEIGHT - HEADER_HEIGHT;
+  int graphHeight = 80;  // Höhe pro Graph
+  
+  // Nur alle 5 Sekunden neu zeichnen
+  if (!firstDraw && millis() - lastHistogramDraw < HISTOGRAM_DRAW_INTERVAL) {
+    return;
+  }
+  lastHistogramDraw = millis();
+  
+  // Hintergrund löschen
+  tft.fillRect(0, startY, SCREEN_WIDTH, height, COLOR_BG);
+  
+  // Titel
+  tft.setTextColor(COLOR_LABEL);
+  tft.setTextDatum(TC_DATUM);
+  tft.drawString("HISTORY (320s)", SCREEN_WIDTH/2, startY + 5, 2);
+  
+  int cpuStartY = startY + 25;
+  int gpuStartY = cpuStartY + graphHeight + 20;  // Mehr Abstand zwischen den Graphen
+  
+  // CPU Label
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(0x07FF);  // Cyan
+  tft.drawString("CPU", 5, cpuStartY - 15, 2);
+  
+  // GPU Label  
+  tft.setTextColor(COLOR_GOOD);  // Grün
+  tft.drawString("GPU", 5, gpuStartY - 15, 2);
+  
+  // Zeichne CPU-Histogramm
+  for (int x = 0; x < SCREEN_WIDTH; x++) {
+    int idx = (historyIndex + x) % HISTORY_SIZE;
+    float value = cpuHistory[idx];
+    int barHeight = (int)((value / 100.0) * graphHeight);
+    if (barHeight > 0) {
+      uint16_t color = (value > 90) ? COLOR_CRIT : (value > 70) ? COLOR_WARN : 0x07FF;
+      tft.drawFastVLine(x, cpuStartY + graphHeight - barHeight, barHeight, color);
+    }
+  }
+  
+  // Zeichne GPU-Histogramm
+  for (int x = 0; x < SCREEN_WIDTH; x++) {
+    int idx = (historyIndex + x) % HISTORY_SIZE;
+    float value = gpuHistory[idx];
+    int barHeight = (int)((value / 100.0) * graphHeight);
+    if (barHeight > 0) {
+      uint16_t color = (value > 90) ? COLOR_CRIT : (value > 70) ? COLOR_WARN : COLOR_GOOD;
+      tft.drawFastVLine(x, gpuStartY + graphHeight - barHeight, barHeight, color);
+    }
+  }
+  
+  // Rahmen und Gridlines
+  tft.drawRect(0, cpuStartY, SCREEN_WIDTH, graphHeight, COLOR_LABEL);
+  tft.drawRect(0, gpuStartY, SCREEN_WIDTH, graphHeight, COLOR_LABEL);
+  
+  // 50% Linie
+  tft.drawFastHLine(0, cpuStartY + graphHeight/2, SCREEN_WIDTH, COLOR_LABEL);
+  tft.drawFastHLine(0, gpuStartY + graphHeight/2, SCREEN_WIDTH, COLOR_LABEL);
+  
+  firstDraw = false;
+}
+
 void parseSerialData(String data) {
   JsonDocument doc;
   DeserializationError error = deserializeJson(doc, data);
@@ -282,6 +374,14 @@ void parseSerialData(String data) {
   sysData.ramUsage = doc["ram_usage"] | 0.0;
   lastDataReceived = millis();
   sysData.lastUpdate = millis();
+  
+  // History-Update (alle 1 Sekunde)
+  if (millis() - lastHistoryUpdate >= HISTORY_UPDATE_INTERVAL) {
+    cpuHistory[historyIndex] = sysData.cpuUsage;
+    gpuHistory[historyIndex] = sysData.gpuUsage;
+    historyIndex = (historyIndex + 1) % HISTORY_SIZE;
+    lastHistoryUpdate = millis();
+  }
   
   // Display nur im Normal-Mode updaten (Wave-Mode rendert selbst)
   // Aber Daten werden immer gespeichert für später
@@ -311,7 +411,7 @@ void loop() {
   
   // Mode-Wechsel prüfen
   if (sysData.firstDataReceived && millis() - lastModeSwitch > MODE_SWITCH_INTERVAL) {
-    displayMode = (displayMode + 1) % 2;
+    displayMode = (displayMode + 1) % 3;  // 3 Modi: Normal, Waves, Histogram
     lastModeSwitch = millis();
     updateHeader();  // Header mit neuem Mode-Indikator aktualisieren
     
@@ -321,6 +421,9 @@ void loop() {
     } else if (displayMode == DISPLAY_MODE_WAVES) {
       // Screen löschen für Wave-Mode
       tft.fillRect(0, HEADER_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT - HEADER_HEIGHT, COLOR_BG);
+    } else if (displayMode == DISPLAY_MODE_HISTOGRAM) {
+      // Histogramm wird beim ersten Aufruf gezeichnet
+      drawHistogram();
     }
   }
   
@@ -328,6 +431,9 @@ void loop() {
   if (displayMode == DISPLAY_MODE_WAVES && sysData.firstDataReceived) {
     drawWaveVisualization();
     // Kein delay mehr - maximale FPS
+  } else if (displayMode == DISPLAY_MODE_HISTOGRAM && sysData.firstDataReceived) {
+    drawHistogram();  // Wird intern nur alle 5 Sekunden neu gezeichnet
+    delay(100);
   } else if (displayMode == DISPLAY_MODE_NORMAL) {
     delay(50);
   }
