@@ -32,7 +32,7 @@ class LibreHardwareMonitorClient:
         
         Args:
             data: JSON-Daten von LibreHardwareMonitor
-            hardware_type: z.B. 'CPU', 'GpuNvidia'
+            hardware_type: z.B. 'CPU', 'GpuNvidia' (wenn leer => suche in allen Hardware-Einträgen)
             sensor_type: z.B. 'Temperature', 'Load', 'Fan'
             name_contains: Teil des Sensor-Namens
             
@@ -44,23 +44,30 @@ class LibreHardwareMonitorClient:
         
         def search_children(items):
             for item in items:
-                # Prüfe Hardware-Typ
-                if 'Text' in item and hardware_type.lower() in item.get('Text', '').lower():
-                    # Durchsuche Sensoren
-                    if 'Children' in item:
-                        for sensor_group in item['Children']:
-                            if sensor_group.get('Text', '').lower() == sensor_type.lower():
-                                if 'Children' in sensor_group:
-                                    for sensor in sensor_group['Children']:
-                                        if name_contains.lower() in sensor.get('Text', '').lower():
-                                            value_str = sensor.get('Value', '0')
-                                            # Entferne Einheiten (°C, %, RPM, etc.)
-                                            value_str = value_str.replace('°C', '').replace('%', '').replace('RPM', '').strip()
-                                            try:
-                                                return float(value_str)
-                                            except:
-                                                return None
-                
+                # Prüfe Hardware-Typ (wenn hardware_type leer, dann als Match behandeln)
+                hw_text = item.get('Text', '') if 'Text' in item else ''
+                hw_match = True
+                if hardware_type:
+                    hw_match = hardware_type.lower() in hw_text.lower()
+
+                if hw_match and 'Children' in item:
+                    # Durchsuche Sensorengruppen unter dieser Hardware
+                    for sensor_group in item['Children']:
+                        # Lockere Übereinstimmung: Sensor-Typ enthalten (nicht nur exakt gleich)
+                        if sensor_type.lower() in sensor_group.get('Text', '').lower():
+                            if 'Children' in sensor_group:
+                                for sensor in sensor_group['Children']:
+                                    if name_contains.lower() in sensor.get('Text', '').lower():
+                                        value_str = sensor.get('Value', '0')
+                                        # Entferne Einheiten (°C, %, RPM, etc.)
+                                        value_str = value_str.replace('°C', '').replace('%', '').replace('RPM', '').strip()
+                                        # Konvertiere deutsche Komma-Decimalstellen zu Punkt
+                                        value_str = value_str.replace(',', '.')
+                                        try:
+                                            return float(value_str)
+                                        except:
+                                            return None
+
                 # Rekursiv durchsuchen
                 if 'Children' in item:
                     result = search_children(item['Children'])
@@ -90,20 +97,41 @@ class LibreHardwareMonitorClient:
         cpu_usage = self.find_sensor(data, 'Intel', 'Load', 'CPU Total') or \
                     self.find_sensor(data, 'AMD', 'Load', 'CPU Total') or 0.0
         
-        # CPU-Lüfter (falls vorhanden, sonst 0)
-        cpu_fan = self.find_sensor(data, 'HP', 'Fans', 'Fan') or \
-                  self.find_sensor(data, 'Mainboard', 'Fans', 'Fan #1') or \
-                  self.find_sensor(data, 'Mainboard', 'Fans', 'CPU Fan') or 0
-        
+        # CPU-Lüfter (falls vorhanden, sonst 0). Wichtig: 0 ist ein valider Wert (Lüfter aus).
+        cpu_fan = self.find_sensor(data, 'HP', 'Fans', 'Fan')
+        if cpu_fan is None:
+            cpu_fan = self.find_sensor(data, 'Mainboard', 'Fans', 'Fan #1')
+        if cpu_fan is None:
+            cpu_fan = self.find_sensor(data, 'Mainboard', 'Fans', 'CPU Fan')
+        # Fallback: Suche global über alle Hardware-Einträge (nur wenn noch nicht gefunden)
+        if cpu_fan is None:
+            cpu_fan = self.find_sensor(data, '', 'Fans', 'Fan')
+        if cpu_fan is None:
+            cpu_fan = self.find_sensor(data, '', 'Fans', 'Fan #1')
+        if cpu_fan is None:
+            cpu_fan = 0
+
         # GPU-Daten (NVIDIA)
-        gpu_temp = self.find_sensor(data, 'NVIDIA', 'Temperatures', 'GPU Core') or \
-                   self.find_sensor(data, 'AMD', 'Temperatures', 'GPU Core') or 0.0
-        
-        gpu_usage = self.find_sensor(data, 'NVIDIA', 'Load', 'GPU Core') or \
-                    self.find_sensor(data, 'AMD', 'Load', 'GPU Core') or 0.0
-        
-        gpu_fan = self.find_sensor(data, 'NVIDIA', 'Fans', 'GPU Fan') or \
-                  self.find_sensor(data, 'AMD', 'Fans', 'GPU Fan') or 0
+        gpu_temp = self.find_sensor(data, 'NVIDIA', 'Temperatures', 'GPU Core')
+        if gpu_temp is None:
+            gpu_temp = self.find_sensor(data, 'AMD', 'Temperatures', 'GPU Core')
+        if gpu_temp is None:
+            gpu_temp = 0.0
+
+        gpu_usage = self.find_sensor(data, 'NVIDIA', 'Load', 'GPU Core')
+        if gpu_usage is None:
+            gpu_usage = self.find_sensor(data, 'AMD', 'Load', 'GPU Core')
+        if gpu_usage is None:
+            gpu_usage = 0.0
+
+        # GPU fan: nur nach spezifischem GPU-Fan suchen; wenn nicht gefunden, 0 (kein Fan)
+        gpu_fan = self.find_sensor(data, 'NVIDIA', 'Fans', 'GPU Fan')
+        if gpu_fan is None:
+            gpu_fan = self.find_sensor(data, 'AMD', 'Fans', 'GPU Fan')
+        if gpu_fan is None:
+            gpu_fan = self.find_sensor(data, '', 'Fans', 'GPU Fan')
+        if gpu_fan is None:
+            gpu_fan = 0
         
         # RAM
         ram_usage = self.find_sensor(data, 'Memory', 'Load', 'Memory') or 0.0

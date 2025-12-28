@@ -20,7 +20,7 @@ echo.
 REM Python-Pakete installieren
 echo [INFO] Installiere benoetigte Pakete...
 echo.
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 
 if errorlevel 1 (
     echo.

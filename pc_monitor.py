@@ -18,13 +18,18 @@ except ImportError:
     LHM_AVAILABLE = False
 
 # GPU und erweiterte Sensor-Unterstützung
+print(f"[DEBUG] Python executable: {sys.executable}")
 try:
     import GPUtil
     GPU_AVAILABLE = True
 except ImportError:
-    GPU_AVAILABLE = False
-    print("Info: GPUtil nicht installiert. GPU-Daten eingeschränkt.")
-    print("      Installiere mit: pip install gputil")
+    try:
+        import gputil as GPUtil
+        GPU_AVAILABLE = True
+    except ImportError:
+        GPU_AVAILABLE = False
+        print("Info: GPUtil nicht installiert. GPU-Daten eingeschränkt.")
+        print("      Installiere mit: python -m pip install gputil")
 
 class SystemMonitor:
     def __init__(self, port=None, baudrate=115200):
@@ -287,7 +292,16 @@ class SystemMonitor:
         if self.lhm_client:
             lhm_data = self.lhm_client.get_system_data()
             if lhm_data:
-                return lhm_data
+                # Falls LHM Werte liefert, aber alle Null sind, ignoriere und nutze psutil-Fallback
+                try:
+                    if (lhm_data.get('cpu_temp', 0) == 0 and
+                        lhm_data.get('cpu_usage', 0) == 0 and
+                        lhm_data.get('ram_usage', 0) == 0):
+                        print("[DEBUG] LibreHardwareMonitor liefert nur Nullen, verwende psutil-Fallback")
+                    else:
+                        return lhm_data
+                except Exception:
+                    pass
         
         # Fallback: psutil
         # CPU-Daten

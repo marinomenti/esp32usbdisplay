@@ -1,4 +1,5 @@
 @echo off
+if "%1" neq "min" start "" /min "%~f0" min & exit
 echo ========================================
 echo ESP32 USB Display - System Monitor
 echo ========================================
@@ -8,17 +9,10 @@ REM Pruefe ob LibreHardwareMonitor vorhanden ist
 if exist "LibreHardwareMonitor\LibreHardwareMonitor.exe" (
     echo [INFO] Starte LibreHardwareMonitor...
     
-    REM Pruefe ob bereits laeuft
-    tasklist /FI "IMAGENAME eq LibreHardwareMonitor.exe" 2>NUL | find /I /N "LibreHardwareMonitor.exe">NUL
-    if "%ERRORLEVEL%"=="0" (
-        echo [OK] LibreHardwareMonitor laeuft bereits
-    ) else (
-        REM Starte LibreHardwareMonitor im Hintergrund
         start "" "LibreHardwareMonitor\LibreHardwareMonitor.exe"
         echo [OK] LibreHardwareMonitor gestartet
         echo [INFO] Warte 3 Sekunden auf Initialisierung...
         timeout /t 3 /nobreak >nul
-    )
     echo.
 ) else (
     echo [WARNUNG] LibreHardwareMonitor nicht gefunden in: LibreHardwareMonitor\
